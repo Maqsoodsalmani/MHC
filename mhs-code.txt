@@ -1,0 +1,1691 @@
+MHS WEBSITE - COMPLETE CODE
+===========================
+
+Included: every file created or changed for the MHS booking website.
+Template files that were left unchanged (main.tsx, index.css, vite.config.ts,
+package.json, tsconfig files) are not repeated here.
+
+
+-------------------------------------------------------------------
+FILE: index.html
+-------------------------------------------------------------------
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&display=swap" rel="stylesheet" />
+    <title>MHS | Book Your Doctor Appointment</title>
+    <meta name="description" content="MHS makes it simple to find a doctor and book a consultation online." />
+    <meta property="og:image" content="https://bolt.new/static/og_default.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://bolt.new/static/og_default.png" />
+  </head>
+  <body class="font-sans">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
+
+-------------------------------------------------------------------
+FILE: tailwind.config.js
+-------------------------------------------------------------------
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
+  theme: {
+    extend: {
+      fontFamily: {
+        sans: ['Manrope', 'system-ui', 'sans-serif'],
+      },
+      keyframes: {
+        'fade-up': {
+          '0%': { opacity: '0', transform: 'translateY(16px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+      },
+      animation: {
+        'fade-up': 'fade-up 0.7s ease-out both',
+      },
+      colors: {
+        primary: {
+          50: '#EEF6FF',
+          100: '#D9EAFD',
+          200: '#BCDAFB',
+          300: '#8EC2F8',
+          400: '#59A3F3',
+          500: '#3282EC',
+          600: '#1F66D6',
+          700: '#1A52AE',
+          800: '#1B4589',
+          900: '#1C3B70',
+        },
+        accent: {
+          50: '#EEFBF5',
+          100: '#D5F5E6',
+          200: '#AEEACF',
+          300: '#76DBB2',
+          400: '#3EC393',
+          500: '#1FA67A',
+          600: '#14865F',
+          700: '#126B4D',
+          800: '#125540',
+          900: '#114635',
+        },
+      },
+    },
+  },
+  plugins: [],
+};
+
+
+-------------------------------------------------------------------
+FILE: src/App.tsx
+-------------------------------------------------------------------
+import { useState } from 'react';
+import Navbar from '@/components/layout/Navbar';
+import Footer from '@/components/layout/Footer';
+import Hero from '@/components/home/Hero';
+import Services from '@/components/home/Services';
+import Doctors from '@/components/home/Doctors';
+import HowItWorks from '@/components/home/HowItWorks';
+import BookingSection, { type DoctorPreselection } from '@/components/booking/BookingSection';
+import { useDoctors } from '@/hooks/useDoctors';
+
+function App() {
+  const directory = useDoctors();
+  const [preselection, setPreselection] = useState<DoctorPreselection | null>(null);
+
+  const handleBookDoctor = (doctorId: string) => {
+    setPreselection({ doctorId });
+    document.getElementById('book')?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  return (
+    <div className="min-h-screen bg-white text-slate-800 antialiased">
+      <Navbar />
+      <main>
+        <Hero />
+        <Services />
+        <Doctors directory={directory} onBookDoctor={handleBookDoctor} />
+        <HowItWorks />
+        <BookingSection
+          doctors={directory.status === 'ready' ? directory.doctors : []}
+          preselection={preselection}
+        />
+      </main>
+      <Footer />
+    </div>
+  );
+}
+
+export default App;
+
+
+-------------------------------------------------------------------
+FILE: src/lib/supabase.ts
+-------------------------------------------------------------------
+import { createClient } from '@supabase/supabase-js';
+
+export const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY,
+);
+
+
+-------------------------------------------------------------------
+FILE: src/lib/types.ts
+-------------------------------------------------------------------
+export type Doctor = {
+  id: string;
+  name: string;
+  specialty: string;
+  qualification: string;
+  experience_years: number;
+  bio: string;
+  working_days: number[];
+};
+
+export type BookingInput = {
+  doctorId: string;
+  date: string;
+  time: string;
+  patientName: string;
+  patientEmail: string;
+  patientPhone: string;
+  reason: string;
+};
+
+export type NotificationStatus = 'sent' | 'failed' | 'not_configured' | 'no_contact';
+
+export type BookingResult = {
+  appointmentId: string;
+  notifications: {
+    patientEmail: NotificationStatus;
+    patientSms: NotificationStatus;
+    doctorEmail: NotificationStatus;
+    doctorSms: NotificationStatus;
+  };
+};
+
+
+-------------------------------------------------------------------
+FILE: src/lib/booking.ts
+-------------------------------------------------------------------
+import { supabase } from '@/lib/supabase';
+import type { BookingInput, BookingResult } from '@/lib/types';
+
+export const SLOT_TIMES = [
+  '09:00', '09:30', '10:00', '10:30', '11:00', '11:30',
+  '12:00', '12:30', '14:00', '14:30', '15:00', '15:30',
+  '16:00', '16:30', '17:00', '17:30',
+];
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+export function toDateInputValue(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+export function weekdayOf(date: string): number {
+  const day = new Date(`${date}T00:00:00Z`).getUTCDay();
+  return day === 0 ? 7 : day;
+}
+
+export function isSlotInPast(date: string, time: string, now: Date): boolean {
+  return new Date(`${date}T${time}:00`).getTime() <= now.getTime();
+}
+
+export function formatDisplayDate(date: string): string {
+  return new Date(`${date}T00:00:00`).toLocaleDateString('en-GB', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
+export function formatDisplayTime(time: string): string {
+  const [h, m] = time.split(':').map(Number);
+  const period = h >= 12 ? 'PM' : 'AM';
+  const hour12 = h % 12 === 0 ? 12 : h % 12;
+  return `${hour12}:${String(m).padStart(2, '0')} ${period}`;
+}
+
+export async function fetchBookedSlots(doctorId: string, date: string): Promise<string[]> {
+  const { data, error } = await supabase.rpc('get_booked_slots', {
+    p_doctor_id: doctorId,
+    p_date: date,
+  });
+  if (error) throw new Error('Could not load available time slots.');
+  if (!Array.isArray(data)) throw new Error('Could not load available time slots.');
+  return data.filter((t): t is string => typeof t === 'string').map((t) => t.slice(0, 5));
+}
+
+export async function createAppointment(input: BookingInput): Promise<BookingResult> {
+  const response = await fetch(`${SUPABASE_URL}/functions/v1/book-appointment`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      apikey: SUPABASE_ANON_KEY,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(input),
+  });
+
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message = body && typeof body.error === 'string' ? body.error : 'Booking failed. Please try again.';
+    throw new Error(message);
+  }
+  if (!body || typeof body.appointmentId !== 'string' || !body.notifications) {
+    throw new Error('Booking failed. Please try again.');
+  }
+  return body as BookingResult;
+}
+
+
+-------------------------------------------------------------------
+FILE: src/hooks/useDoctors.ts
+-------------------------------------------------------------------
+import { useCallback, useEffect, useState } from 'react';
+import { supabase } from '@/lib/supabase';
+import type { Doctor } from '@/lib/types';
+
+type DoctorsState =
+  | { status: 'loading'; doctors: [] }
+  | { status: 'ready'; doctors: Doctor[] }
+  | { status: 'error'; doctors: [] };
+
+export type DoctorDirectory = ReturnType<typeof useDoctors>;
+
+export function useDoctors() {
+  const [state, setState] = useState<DoctorsState>({ status: 'loading', doctors: [] });
+
+  const load = useCallback(async () => {
+    setState({ status: 'loading', doctors: [] });
+    const { data, error } = await supabase
+      .from('doctors')
+      .select('id, name, specialty, qualification, experience_years, bio, working_days')
+      .order('name');
+    if (error || !Array.isArray(data)) {
+      setState({ status: 'error', doctors: [] });
+      return;
+    }
+    setState({ status: 'ready', doctors: data as Doctor[] });
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  return { ...state, reload: load };
+}
+
+
+-------------------------------------------------------------------
+FILE: src/components/layout/Navbar.tsx
+-------------------------------------------------------------------
+import { useEffect, useState } from 'react';
+import { HeartPulse, Menu, X } from 'lucide-react';
+
+const NAV_LINKS = [
+  { href: '#services', label: 'Services' },
+  { href: '#doctors', label: 'Doctors' },
+  { href: '#how-it-works', label: 'How it works' },
+  { href: '#book', label: 'Book online' },
+];
+
+export default function Navbar() {
+  const [scrolled, setScrolled] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 16);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  return (
+    <header
+      className={`fixed inset-x-0 top-0 z-50 transition-all duration-300 ${
+        scrolled || menuOpen
+          ? 'bg-white/95 shadow-sm shadow-primary-900/5 backdrop-blur'
+          : 'bg-transparent'
+      }`}
+    >
+      <nav className="mx-auto flex h-20 max-w-7xl items-center justify-between px-6 lg:px-8">
+        <a href="#top" className="flex items-center gap-2" aria-label="MHS home">
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary-600 to-accent-500 text-white shadow-md shadow-primary-600/20">
+            <HeartPulse className="h-5 w-5" />
+          </span>
+          <span className="text-xl font-bold tracking-tight text-primary-900">MHS</span>
+        </a>
+
+        <ul className="hidden items-center gap-8 md:flex">
+          {NAV_LINKS.slice(0, 3).map((link) => (
+            <li key={link.href}>
+              <a
+                href={link.href}
+                className="text-sm font-semibold text-slate-700 transition-colors hover:text-primary-600"
+              >
+                {link.label}
+              </a>
+            </li>
+          ))}
+        </ul>
+
+        <div className="hidden md:block">
+          <a
+            href="#book"
+            className="inline-flex items-center rounded-full bg-primary-600 px-6 py-2.5 text-sm font-semibold text-white shadow-md shadow-primary-600/25 transition-all hover:-translate-y-0.5 hover:bg-primary-700"
+          >
+            Book appointment
+          </a>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setMenuOpen((open) => !open)}
+          className="rounded-lg p-2 text-slate-800 transition-colors hover:bg-primary-50 md:hidden"
+          aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+          aria-expanded={menuOpen}
+        >
+          {menuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+        </button>
+      </nav>
+
+      {menuOpen && (
+        <div className="border-t border-slate-100 bg-white px-6 pb-6 md:hidden">
+          <ul className="flex flex-col">
+            {NAV_LINKS.map((link) => (
+              <li key={link.href}>
+                <a
+                  href={link.href}
+                  onClick={() => setMenuOpen(false)}
+                  className="block border-b border-slate-100 py-4 text-base font-semibold text-slate-800"
+                >
+                  {link.label}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </header>
+  );
+}
+
+
+-------------------------------------------------------------------
+FILE: src/components/layout/Footer.tsx
+-------------------------------------------------------------------
+import { HeartPulse, Mail, MapPin, Phone } from 'lucide-react';
+
+const QUICK_LINKS = [
+  { href: '#services', label: 'Services' },
+  { href: '#doctors', label: 'Doctors' },
+  { href: '#how-it-works', label: 'How it works' },
+  { href: '#book', label: 'Book online' },
+];
+
+export default function Footer() {
+  return (
+    <footer className="bg-primary-900 text-primary-100">
+      <div className="mx-auto grid max-w-7xl gap-10 px-6 py-16 md:grid-cols-3 lg:px-8">
+        <div>
+          <a href="#top" className="flex items-center gap-2">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 text-white">
+              <HeartPulse className="h-5 w-5" />
+            </span>
+            <span className="text-xl font-bold tracking-tight text-white">MHS</span>
+          </a>
+          <p className="mt-5 max-w-sm leading-relaxed text-primary-200">
+            Trusted medical care, booked online. Find the right specialist and secure your consultation in minutes.
+          </p>
+        </div>
+
+        <div>
+          <h4 className="text-sm font-bold uppercase tracking-wider text-white">Explore</h4>
+          <ul className="mt-5 space-y-3">
+            {QUICK_LINKS.map((link) => (
+              <li key={link.href}>
+                <a href={link.href} className="text-primary-200 transition-colors hover:text-white">
+                  {link.label}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div>
+          <h4 className="text-sm font-bold uppercase tracking-wider text-white">Contact</h4>
+          <ul className="mt-5 space-y-4 text-primary-200">
+            <li className="flex items-center gap-3">
+              <Phone className="h-4 w-4 text-accent-300" />
+              Support line available during clinic hours
+            </li>
+            <li className="flex items-center gap-3">
+              <Mail className="h-4 w-4 text-accent-300" />
+              Reach us through the booking form
+            </li>
+            <li className="flex items-center gap-3">
+              <MapPin className="h-4 w-4 text-accent-300" />
+              Online consultations across all our clinics
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <div className="border-t border-white/10">
+        <p className="mx-auto max-w-7xl px-6 py-6 text-sm text-primary-300 lg:px-8">
+          &copy; {new Date().getFullYear()} MHS. All rights reserved.
+        </p>
+      </div>
+    </footer>
+  );
+}
+
+
+-------------------------------------------------------------------
+FILE: src/components/home/Hero.tsx
+-------------------------------------------------------------------
+import { CalendarCheck, ShieldCheck, Stethoscope } from 'lucide-react';
+
+const HERO_IMAGE =
+  'https://images.pexels.com/photos/7579823/pexels-photo-7579823.jpeg?auto=compress&cs=tinysrgb&h=650&w=940';
+
+const TRUST_POINTS = [
+  { icon: Stethoscope, label: 'Verified specialists' },
+  { icon: CalendarCheck, label: 'Pick a time that suits you' },
+  { icon: ShieldCheck, label: 'Private and secure' },
+];
+
+export default function Hero() {
+  return (
+    <section id="top" className="relative overflow-hidden bg-gradient-to-b from-primary-50 via-white to-white pt-32 pb-20 lg:pt-40 lg:pb-28">
+      <div className="pointer-events-none absolute -top-32 -right-32 h-96 w-96 rounded-full bg-accent-100/70 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-40 -left-24 h-96 w-96 rounded-full bg-primary-100/80 blur-3xl" />
+
+      <div className="relative mx-auto grid max-w-7xl items-center gap-12 px-6 lg:grid-cols-2 lg:gap-16 lg:px-8">
+        <div className="animate-fade-up">
+          <span className="inline-flex items-center gap-2 rounded-full border border-accent-200 bg-white px-4 py-1.5 text-sm font-semibold text-accent-700 shadow-sm">
+            <span className="h-2 w-2 rounded-full bg-accent-500" />
+            Online doctor appointments, made simple
+          </span>
+
+          <h1 className="mt-6 text-4xl font-bold leading-[1.15] tracking-tight text-primary-900 sm:text-5xl lg:text-6xl">
+            Find the right doctor and <span className="text-primary-600">book in minutes</span>
+          </h1>
+
+          <p className="mt-6 max-w-xl text-lg leading-relaxed text-slate-600">
+            MHS connects you with trusted specialists. Choose your doctor, pick a date and time slot,
+            and receive instant confirmation by email and SMS.
+          </p>
+
+          <div className="mt-10 flex flex-col gap-4 sm:flex-row">
+            <a
+              href="#book"
+              className="inline-flex items-center justify-center rounded-full bg-primary-600 px-8 py-3.5 text-base font-semibold text-white shadow-lg shadow-primary-600/25 transition-all hover:-translate-y-0.5 hover:bg-primary-700"
+            >
+              Book an appointment
+            </a>
+            <a
+              href="#doctors"
+              className="inline-flex items-center justify-center rounded-full border border-primary-200 bg-white px-8 py-3.5 text-base font-semibold text-primary-700 transition-colors hover:border-primary-400 hover:bg-primary-50"
+            >
+              Meet our doctors
+            </a>
+          </div>
+
+          <ul className="mt-10 flex flex-wrap gap-x-8 gap-y-3">
+            {TRUST_POINTS.map(({ icon: Icon, label }) => (
+              <li key={label} className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                <Icon className="h-5 w-5 text-accent-600" />
+                {label}
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="relative animate-fade-up [animation-delay:150ms]">
+          <div className="absolute -inset-3 rounded-[2rem] bg-gradient-to-br from-primary-200/60 to-accent-200/60 blur-xl" />
+          <img
+            src={HERO_IMAGE}
+            alt="A doctor consulting a patient in a modern medical office"
+            className="relative h-[420px] w-full rounded-[2rem] object-cover shadow-2xl shadow-primary-900/15 lg:h-[520px]"
+          />
+          <div className="absolute -bottom-6 left-6 right-6 flex items-center gap-4 rounded-2xl bg-white p-4 shadow-xl shadow-primary-900/10 sm:left-auto sm:right-auto sm:w-80 sm:-left-8">
+            <span className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-accent-100 text-accent-700">
+              <CalendarCheck className="h-6 w-6" />
+            </span>
+            <div>
+              <p className="text-sm font-bold text-primary-900">Appointment confirmed</p>
+              <p className="text-xs text-slate-500">Confirmation sent to your email and phone</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+
+-------------------------------------------------------------------
+FILE: src/components/home/Services.tsx
+-------------------------------------------------------------------
+import { Activity, Baby, Bone, HeartPulse, Scan, Sparkles } from 'lucide-react';
+
+const SERVICES = [
+  { icon: HeartPulse, title: 'Cardiology', description: 'Heart health checks, blood pressure care and long-term cardiac follow-ups.' },
+  { icon: Sparkles, title: 'Dermatology', description: 'Skin, hair and nail treatments from specialists who keep you looking and feeling your best.' },
+  { icon: Baby, title: 'Pediatrics', description: 'Gentle, thorough care for newborns, children and teens, including vaccinations.' },
+  { icon: Bone, title: 'Orthopedics', description: 'Bone, joint and sports injury consultations with clear, practical treatment plans.' },
+  { icon: Activity, title: 'General Consultation', description: 'Everyday illnesses, routine check-ups and referrals when you need a second opinion.' },
+  { icon: Scan, title: 'Diagnostics', description: 'Guidance on tests and reports, so you understand your results before you leave.' },
+];
+
+export default function Services() {
+  return (
+    <section id="services" className="bg-white py-20 lg:py-28">
+      <div className="mx-auto max-w-7xl px-6 lg:px-8">
+        <div className="mx-auto max-w-2xl text-center">
+          <p className="text-sm font-bold uppercase tracking-wider text-accent-600">Our services</p>
+          <h2 className="mt-3 text-3xl font-bold tracking-tight text-primary-900 sm:text-4xl">
+            Care for every stage of life
+          </h2>
+          <p className="mt-4 text-lg leading-relaxed text-slate-600">
+            From routine check-ups to specialist consultations, book the care you need with a few clicks.
+          </p>
+        </div>
+
+        <div className="mt-14 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          {SERVICES.map(({ icon: Icon, title, description }) => (
+            <article
+              key={title}
+              className="group rounded-2xl border border-slate-100 bg-white p-8 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-primary-100 hover:shadow-xl hover:shadow-primary-900/5"
+            >
+              <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary-50 text-primary-600 transition-colors group-hover:bg-primary-600 group-hover:text-white">
+                <Icon className="h-6 w-6" />
+              </span>
+              <h3 className="mt-6 text-xl font-bold text-primary-900">{title}</h3>
+              <p className="mt-3 leading-relaxed text-slate-600">{description}</p>
+            </article>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+
+-------------------------------------------------------------------
+FILE: src/components/home/Doctors.tsx
+-------------------------------------------------------------------
+import { AlertCircle, ArrowRight, Award, Briefcase, Loader2 } from 'lucide-react';
+import type { Doctor } from '@/lib/types';
+import type { DoctorDirectory } from '@/hooks/useDoctors';
+
+type DoctorsProps = {
+  directory: DoctorDirectory;
+  onBookDoctor: (doctorId: string) => void;
+};
+
+export default function Doctors({ directory, onBookDoctor }: DoctorsProps) {
+  const { status, doctors, reload } = directory;
+
+  return (
+    <section id="doctors" className="bg-slate-50 py-20 lg:py-28">
+      <div className="mx-auto max-w-7xl px-6 lg:px-8">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div className="max-w-2xl">
+            <p className="text-sm font-bold uppercase tracking-wider text-accent-600">Our doctors</p>
+            <h2 className="mt-3 text-3xl font-bold tracking-tight text-primary-900 sm:text-4xl">
+              Meet your specialists
+            </h2>
+            <p className="mt-4 text-lg leading-relaxed text-slate-600">
+              Experienced doctors who listen, explain clearly and follow up with you.
+            </p>
+          </div>
+        </div>
+
+        {status === 'loading' && (
+          <div className="mt-14 flex items-center justify-center gap-3 text-slate-600">
+            <Loader2 className="h-5 w-5 animate-spin text-primary-600" />
+            Loading our doctors...
+          </div>
+        )}
+
+        {status === 'error' && (
+          <div className="mt-14 flex flex-col items-center gap-4 rounded-2xl border border-red-100 bg-white p-8 text-center">
+            <AlertCircle className="h-8 w-8 text-red-500" />
+            <p className="text-slate-700">We could not load our doctors right now.</p>
+            <button
+              type="button"
+              onClick={reload}
+              className="rounded-full bg-primary-600 px-6 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-700"
+            >
+              Try again
+            </button>
+          </div>
+        )}
+
+        {status === 'ready' && doctors.length === 0 && (
+          <p className="mt-14 text-center text-slate-600">No doctors are listed yet. Please check back soon.</p>
+        )}
+
+        {status === 'ready' && doctors.length > 0 && (
+          <div className="mt-14 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+            {doctors.map((doctor) => (
+              <DoctorCard key={doctor.id} doctor={doctor} onBook={() => onBookDoctor(doctor.id)} />
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function DoctorCard({ doctor, onBook }: { doctor: Doctor; onBook: () => void }) {
+  const initials = doctor.name
+    .replace(/^Dr\.?\s*/i, '')
+    .split(' ')
+    .map((part) => part[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
+
+  return (
+    <article className="group flex flex-col rounded-2xl bg-white p-7 shadow-sm ring-1 ring-slate-100 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-primary-900/5">
+      <div className="flex items-center gap-4">
+        <span className="flex h-16 w-16 flex-shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-500 to-accent-500 text-xl font-bold text-white shadow-md shadow-primary-600/20">
+          {initials}
+        </span>
+        <div>
+          <h3 className="text-lg font-bold text-primary-900">{doctor.name}</h3>
+          <p className="text-sm font-semibold text-accent-700">{doctor.specialty}</p>
+        </div>
+      </div>
+
+      <div className="mt-6 space-y-2 text-sm text-slate-600">
+        <p className="flex items-center gap-2">
+          <Award className="h-4 w-4 text-primary-500" />
+          {doctor.qualification}
+        </p>
+        <p className="flex items-center gap-2">
+          <Briefcase className="h-4 w-4 text-primary-500" />
+          {doctor.experience_years} years of experience
+        </p>
+      </div>
+
+      <p className="mt-4 flex-1 text-sm leading-relaxed text-slate-600">{doctor.bio}</p>
+
+      <button
+        type="button"
+        onClick={onBook}
+        className="mt-6 inline-flex items-center justify-center gap-2 rounded-full border border-primary-200 px-5 py-2.5 text-sm font-semibold text-primary-700 transition-all hover:border-primary-600 hover:bg-primary-600 hover:text-white"
+      >
+        Book with {doctor.name}
+        <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+      </button>
+    </article>
+  );
+}
+
+
+-------------------------------------------------------------------
+FILE: src/components/home/HowItWorks.tsx
+-------------------------------------------------------------------
+import { CalendarPlus, MailCheck, Stethoscope } from 'lucide-react';
+
+const STEPS = [
+  {
+    icon: Stethoscope,
+    title: 'Choose your doctor',
+    description: 'Browse our specialists and pick the one who fits your need.',
+  },
+  {
+    icon: CalendarPlus,
+    title: 'Pick a date and time',
+    description: 'See live availability and select a slot that works for your schedule.',
+  },
+  {
+    icon: MailCheck,
+    title: 'Get confirmed instantly',
+    description: 'You and your doctor receive the details by email and SMS straight away.',
+  },
+];
+
+export default function HowItWorks() {
+  return (
+    <section id="how-it-works" className="scroll-mt-20 bg-white py-20 lg:py-28">
+      <div className="mx-auto max-w-7xl px-6 lg:px-8">
+        <div className="mx-auto max-w-2xl text-center">
+          <p className="text-sm font-bold uppercase tracking-wider text-accent-600">How it works</p>
+          <h2 className="mt-3 text-3xl font-bold tracking-tight text-primary-900 sm:text-4xl">
+            Three simple steps to care
+          </h2>
+        </div>
+
+        <div className="relative mt-16 grid gap-10 md:grid-cols-3">
+          <div className="pointer-events-none absolute left-[16%] right-[16%] top-8 hidden h-px border-t-2 border-dashed border-primary-200 md:block" />
+          {STEPS.map(({ icon: Icon, title, description }, index) => (
+            <div key={title} className="relative text-center">
+              <span className="relative mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-600 to-accent-500 text-white shadow-lg shadow-primary-600/25">
+                <Icon className="h-7 w-7" />
+                <span className="absolute -right-2 -top-2 flex h-7 w-7 items-center justify-center rounded-full bg-white text-sm font-bold text-primary-700 shadow ring-1 ring-primary-100">
+                  {index + 1}
+                </span>
+              </span>
+              <h3 className="mt-6 text-xl font-bold text-primary-900">{title}</h3>
+              <p className="mx-auto mt-3 max-w-xs leading-relaxed text-slate-600">{description}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+
+-------------------------------------------------------------------
+FILE: src/components/booking/BookingSection.tsx
+-------------------------------------------------------------------
+import { useEffect, useState } from 'react';
+import { ArrowRight, CalendarDays, UserRound } from 'lucide-react';
+import type { Doctor, BookingResult } from '@/lib/types';
+import { createAppointment } from '@/lib/booking';
+import ScheduleStep, { type ScheduleSelection } from '@/components/booking/ScheduleStep';
+import PatientDetailsForm, { type PatientDetails } from '@/components/booking/PatientDetailsForm';
+import BookingConfirmation from '@/components/booking/BookingConfirmation';
+
+export type DoctorPreselection = { doctorId: string };
+
+type BookingSectionProps = {
+  doctors: Doctor[];
+  preselection: DoctorPreselection | null;
+};
+
+type Step = 'schedule' | 'details' | 'done';
+
+const INDICATOR_STEPS = [
+  { id: 'schedule', label: 'Doctor & time', icon: CalendarDays },
+  { id: 'details', label: 'Your details', icon: UserRound },
+] as const;
+
+const EMPTY_DETAILS: PatientDetails = { name: '', email: '', phone: '', reason: '' };
+
+export default function BookingSection({ doctors, preselection }: BookingSectionProps) {
+  const [step, setStep] = useState<Step>('schedule');
+  const [selection, setSelection] = useState<ScheduleSelection>({
+    doctorId: preselection?.doctorId ?? '',
+    date: '',
+    time: '',
+  });
+  useEffect(() => {
+    if (!preselection) return;
+    setSelection((s) => ({ ...s, doctorId: preselection.doctorId, time: '' }));
+    setStep('schedule');
+  }, [preselection]);
+
+  const [details, setDetails] = useState<PatientDetails>(EMPTY_DETAILS);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [result, setResult] = useState<BookingResult | null>(null);
+  const [bookedFor, setBookedFor] = useState<{ doctorName: string; date: string; time: string } | null>(null);
+
+  const doctor = doctors.find((d) => d.id === selection.doctorId);
+  const canContinue = !!doctor && !!selection.date && !!selection.time;
+  const currentStepIndex = INDICATOR_STEPS.findIndex((s) => s.id === step);
+
+  const handleSubmit = async () => {
+    if (!doctor) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const booking = await createAppointment({
+        doctorId: selection.doctorId,
+        date: selection.date,
+        time: selection.time,
+        patientName: details.name.trim(),
+        patientEmail: details.email.trim(),
+        patientPhone: details.phone.trim(),
+        reason: details.reason.trim(),
+      });
+      setResult(booking);
+      setBookedFor({ doctorName: doctor.name, date: selection.date, time: selection.time });
+      setStep('done');
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : 'Booking failed. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const resetBooking = () => {
+    setSelection({ doctorId: '', date: '', time: '' });
+    setDetails(EMPTY_DETAILS);
+    setResult(null);
+    setBookedFor(null);
+    setSubmitError(null);
+    setStep('schedule');
+  };
+
+  return (
+    <section id="book" className="scroll-mt-20 bg-gradient-to-b from-white to-primary-50/60 py-20 lg:py-28">
+      <div className="mx-auto max-w-3xl px-6 lg:px-8">
+        <div className="text-center">
+          <p className="text-sm font-bold uppercase tracking-wider text-accent-600">Book online</p>
+          <h2 className="mt-3 text-3xl font-bold tracking-tight text-primary-900 sm:text-4xl">
+            Schedule your consultation
+          </h2>
+          <p className="mt-4 text-lg leading-relaxed text-slate-600">
+            Pick a doctor, a date and a time slot. Both you and your doctor receive confirmation by email and SMS.
+          </p>
+        </div>
+
+        <div className="mt-10 overflow-hidden rounded-3xl bg-white shadow-xl shadow-primary-900/5 ring-1 ring-slate-100">
+          {step !== 'done' && (
+            <ol className="grid grid-cols-2 border-b border-slate-100 bg-slate-50/70">
+              {INDICATOR_STEPS.map((s, index) => {
+                const active = index === currentStepIndex;
+                const complete = index < currentStepIndex;
+                const Icon = s.icon;
+                return (
+                  <li
+                    key={s.id}
+                    className={`flex items-center justify-center gap-2 px-3 py-4 text-sm font-semibold transition-colors ${
+                      active ? 'bg-white text-primary-700' : complete ? 'text-accent-700' : 'text-slate-400'
+                    }`}
+                  >
+                    <span
+                      className={`flex h-7 w-7 items-center justify-center rounded-full text-xs ${
+                        active
+                          ? 'bg-primary-600 text-white'
+                          : complete
+                            ? 'bg-accent-500 text-white'
+                            : 'bg-slate-200 text-slate-500'
+                      }`}
+                    >
+                      {index + 1}
+                    </span>
+                    <span className="hidden sm:inline">{s.label}</span>
+                    <Icon className="h-4 w-4 sm:hidden" />
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+
+          <div className="p-6 sm:p-10">
+            {step === 'schedule' && (
+              <div className="animate-fade-up">
+                {doctors.length === 0 ? (
+                  <p className="text-center text-slate-600">Doctors are not available for booking right now.</p>
+                ) : (
+                  <ScheduleStep doctors={doctors} selection={selection} onChange={setSelection} />
+                )}
+                <div className="mt-10 flex justify-end">
+                  <button
+                    type="button"
+                    disabled={!canContinue}
+                    onClick={() => setStep('details')}
+                    className="inline-flex items-center gap-2 rounded-full bg-primary-600 px-8 py-3 text-sm font-semibold text-white shadow-lg shadow-primary-600/25 transition-all hover:-translate-y-0.5 hover:bg-primary-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none disabled:hover:translate-y-0"
+                  >
+                    Continue
+                    <ArrowRight className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {step === 'details' && (
+              <div className="animate-fade-up">
+                {doctor && (
+                  <div className="mb-8 rounded-2xl bg-primary-50 px-5 py-4 text-sm text-primary-900">
+                    <span className="font-semibold">{doctor.name}</span> on{' '}
+                    <span className="font-semibold">{selection.date}</span> at{' '}
+                    <span className="font-semibold">{selection.time}</span>
+                  </div>
+                )}
+                <PatientDetailsForm
+                  details={details}
+                  onChange={setDetails}
+                  onBack={() => setStep('schedule')}
+                  onSubmit={handleSubmit}
+                  submitting={submitting}
+                  submitError={submitError}
+                />
+              </div>
+            )}
+
+            {step === 'done' && result && bookedFor && (
+              <div className="animate-fade-up">
+                <BookingConfirmation
+                  result={result}
+                  doctorName={bookedFor.doctorName}
+                  date={bookedFor.date}
+                  time={bookedFor.time}
+                  patientEmail={details.email.trim()}
+                  patientPhone={details.phone.trim()}
+                  onDone={resetBooking}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+
+-------------------------------------------------------------------
+FILE: src/components/booking/ScheduleStep.tsx
+-------------------------------------------------------------------
+import { useEffect, useState } from 'react';
+import { AlertCircle, Loader2 } from 'lucide-react';
+import type { Doctor } from '@/lib/types';
+import {
+  fetchBookedSlots,
+  toDateInputValue,
+  weekdayOf,
+  formatDisplayDate,
+} from '@/lib/booking';
+import SlotPicker from '@/components/booking/SlotPicker';
+
+const BOOKING_WINDOW_DAYS = 60;
+
+export type ScheduleSelection = {
+  doctorId: string;
+  date: string;
+  time: string;
+};
+
+type ScheduleStepProps = {
+  doctors: Doctor[];
+  selection: ScheduleSelection;
+  onChange: (next: ScheduleSelection) => void;
+};
+
+export default function ScheduleStep({ doctors, selection, onChange }: ScheduleStepProps) {
+  const [now] = useState(() => new Date());
+  const [bookedSlots, setBookedSlots] = useState<string[]>([]);
+  const [slotsStatus, setSlotsStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [reloadKey, setReloadKey] = useState(0);
+
+  const { doctorId, date, time } = selection;
+  const doctor = doctors.find((d) => d.id === doctorId);
+  const dayAvailable = !!doctor && !!date && doctor.working_days.includes(weekdayOf(date));
+  const showSlots = dayAvailable && !!doctor;
+
+  useEffect(() => {
+    if (!doctorId || !date || !dayAvailable) {
+      setBookedSlots([]);
+      setSlotsStatus('idle');
+      return;
+    }
+    let cancelled = false;
+    setSlotsStatus('loading');
+    fetchBookedSlots(doctorId, date)
+      .then((slots) => {
+        if (cancelled) return;
+        setBookedSlots(slots);
+        setSlotsStatus('ready');
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setBookedSlots([]);
+        setSlotsStatus('error');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [doctorId, date, dayAvailable, reloadKey]);
+
+  const maxDate = new Date(now);
+  maxDate.setDate(maxDate.getDate() + BOOKING_WINDOW_DAYS);
+
+  return (
+    <div className="space-y-8">
+      <div>
+        <label htmlFor="doctor" className="block text-sm font-semibold text-slate-700">
+          Doctor
+        </label>
+        <select
+          id="doctor"
+          value={doctorId}
+          onChange={(e) => onChange({ doctorId: e.target.value, date, time: '' })}
+          className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-800 shadow-sm transition focus:border-primary-500 focus:outline-none focus:ring-4 focus:ring-primary-100"
+        >
+          <option value="">Choose a doctor</option>
+          {doctors.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.name} - {d.specialty}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <label htmlFor="date" className="block text-sm font-semibold text-slate-700">
+          Appointment date
+        </label>
+        <input
+          id="date"
+          type="date"
+          min={toDateInputValue(now)}
+          max={toDateInputValue(maxDate)}
+          value={date}
+          onChange={(e) => onChange({ doctorId, date: e.target.value, time: '' })}
+          className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-800 shadow-sm transition focus:border-primary-500 focus:outline-none focus:ring-4 focus:ring-primary-100"
+        />
+        {doctor && date && !dayAvailable && (
+          <p className="mt-2 text-sm text-amber-700">
+            {doctor.name} does not see patients on {formatDisplayDate(date)}. Please choose another day.
+          </p>
+        )}
+      </div>
+
+      {showSlots && (
+        <div>
+          {slotsStatus === 'loading' && (
+            <p className="flex items-center gap-2 text-sm text-slate-600">
+              <Loader2 className="h-4 w-4 animate-spin text-primary-600" />
+              Checking available slots...
+            </p>
+          )}
+          {slotsStatus === 'error' && (
+            <div className="flex items-center justify-between gap-4 rounded-xl border border-red-100 bg-red-50 p-4">
+              <p className="flex items-center gap-2 text-sm text-red-700">
+                <AlertCircle className="h-4 w-4" />
+                We could not load the time slots.
+              </p>
+              <button
+                type="button"
+                onClick={() => setReloadKey((k) => k + 1)}
+                className="text-sm font-semibold text-red-700 underline"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+          {slotsStatus === 'ready' && (
+            <SlotPicker
+              date={date}
+              bookedSlots={bookedSlots}
+              selectedTime={time}
+              now={now}
+              onSelect={(t) => onChange({ doctorId, date, time: t })}
+            />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+-------------------------------------------------------------------
+FILE: src/components/booking/SlotPicker.tsx
+-------------------------------------------------------------------
+import { Clock } from 'lucide-react';
+import { SLOT_TIMES, formatDisplayTime, isSlotInPast } from '@/lib/booking';
+
+type SlotPickerProps = {
+  date: string;
+  bookedSlots: string[];
+  selectedTime: string;
+  onSelect: (time: string) => void;
+  now: Date;
+};
+
+export default function SlotPicker({ date, bookedSlots, selectedTime, onSelect, now }: SlotPickerProps) {
+  return (
+    <div>
+      <p className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+        <Clock className="h-4 w-4 text-primary-600" />
+        Available time slots
+      </p>
+      <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
+        {SLOT_TIMES.map((time) => {
+          const booked = bookedSlots.includes(time);
+          const past = isSlotInPast(date, time, now);
+          const disabled = booked || past;
+          const selected = selectedTime === time;
+          return (
+            <button
+              key={time}
+              type="button"
+              disabled={disabled}
+              onClick={() => onSelect(time)}
+              aria-pressed={selected}
+              className={`rounded-xl border px-2 py-2.5 text-sm font-semibold transition-all ${
+                selected
+                  ? 'border-primary-600 bg-primary-600 text-white shadow-md shadow-primary-600/25'
+                  : disabled
+                    ? 'cursor-not-allowed border-slate-100 bg-slate-50 text-slate-400 line-through'
+                    : 'border-slate-200 bg-white text-slate-700 hover:-translate-y-0.5 hover:border-primary-400 hover:text-primary-700'
+              }`}
+            >
+              {formatDisplayTime(time)}
+            </button>
+          );
+        })}
+      </div>
+      <p className="mt-3 text-xs text-slate-500">Struck-through slots are already booked or have passed.</p>
+    </div>
+  );
+}
+
+
+-------------------------------------------------------------------
+FILE: src/components/booking/PatientDetailsForm.tsx
+-------------------------------------------------------------------
+import { useState, type FormEvent, type ReactNode } from 'react';
+import { Loader2 } from 'lucide-react';
+
+export type PatientDetails = {
+  name: string;
+  email: string;
+  phone: string;
+  reason: string;
+};
+
+type PatientDetailsFormProps = {
+  details: PatientDetails;
+  onChange: (next: PatientDetails) => void;
+  onBack: () => void;
+  onSubmit: () => void;
+  submitting: boolean;
+  submitError: string | null;
+};
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_RE = /^\+?[0-9\s()-]{7,20}$/;
+
+const inputClass =
+  'mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-800 shadow-sm transition placeholder:text-slate-400 focus:border-primary-500 focus:outline-none focus:ring-4 focus:ring-primary-100';
+
+export default function PatientDetailsForm({
+  details,
+  onChange,
+  onBack,
+  onSubmit,
+  submitting,
+  submitError,
+}: PatientDetailsFormProps) {
+  const [errors, setErrors] = useState<Partial<Record<keyof PatientDetails, string>>>({});
+
+  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const next: typeof errors = {};
+    if (details.name.trim().length < 2) next.name = 'Please enter the patient name.';
+    if (!EMAIL_RE.test(details.email.trim())) next.email = 'Please enter a valid email address.';
+    if (!PHONE_RE.test(details.phone.trim())) next.phone = 'Please enter a valid phone number.';
+    setErrors(next);
+    if (Object.keys(next).length === 0) onSubmit();
+  };
+
+  const update = (field: keyof PatientDetails) => (value: string) => {
+    onChange({ ...details, [field]: value });
+  };
+
+  return (
+    <form onSubmit={handleSubmit} noValidate className="space-y-6">
+      <div className="grid gap-6 sm:grid-cols-2">
+        <Field label="Patient full name" error={errors.name}>
+          <input
+            type="text"
+            autoComplete="name"
+            value={details.name}
+            onChange={(e) => update('name')(e.target.value)}
+            className={inputClass}
+            placeholder="e.g. Asha Verma"
+          />
+        </Field>
+        <Field label="Phone number" error={errors.phone}>
+          <input
+            type="tel"
+            autoComplete="tel"
+            value={details.phone}
+            onChange={(e) => update('phone')(e.target.value)}
+            className={inputClass}
+            placeholder="+91 98765 43210"
+          />
+        </Field>
+      </div>
+
+      <Field label="Email address" error={errors.email}>
+        <input
+          type="email"
+          autoComplete="email"
+          value={details.email}
+          onChange={(e) => update('email')(e.target.value)}
+          className={inputClass}
+          placeholder="you@example.com"
+        />
+      </Field>
+
+      <Field label="Reason for visit (optional)">
+        <textarea
+          rows={3}
+          value={details.reason}
+          onChange={(e) => update('reason')(e.target.value)}
+          className={inputClass}
+          placeholder="Briefly describe your symptoms or concern"
+        />
+      </Field>
+
+      {submitError && (
+        <p role="alert" className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {submitError}
+        </p>
+      )}
+
+      <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
+        <button
+          type="button"
+          onClick={onBack}
+          disabled={submitting}
+          className="rounded-full border border-slate-200 px-6 py-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
+        >
+          Back
+        </button>
+        <button
+          type="submit"
+          disabled={submitting}
+          className="inline-flex items-center justify-center gap-2 rounded-full bg-primary-600 px-8 py-3 text-sm font-semibold text-white shadow-lg shadow-primary-600/25 transition-all hover:-translate-y-0.5 hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-70"
+        >
+          {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
+          {submitting ? 'Booking...' : 'Confirm appointment'}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function Field({ label, error, children }: { label: string; error?: string; children: ReactNode }) {
+  return (
+    <label className="block">
+      <span className="block text-sm font-semibold text-slate-700">{label}</span>
+      {children}
+      {error && <span className="mt-2 block text-sm text-red-600">{error}</span>}
+    </label>
+  );
+}
+
+
+-------------------------------------------------------------------
+FILE: src/components/booking/BookingConfirmation.tsx
+-------------------------------------------------------------------
+import { CheckCircle2, Mail, MessageSquare } from 'lucide-react';
+import type { BookingResult, NotificationStatus } from '@/lib/types';
+import { formatDisplayDate, formatDisplayTime } from '@/lib/booking';
+
+type BookingConfirmationProps = {
+  result: BookingResult;
+  doctorName: string;
+  date: string;
+  time: string;
+  patientEmail: string;
+  patientPhone: string;
+  onDone: () => void;
+};
+
+const STATUS_TEXT: Record<NotificationStatus, string> = {
+  sent: 'Sent',
+  failed: 'Could not be sent',
+  not_configured: 'Pending setup',
+  no_contact: 'No contact on file',
+};
+
+const STATUS_CLASS: Record<NotificationStatus, string> = {
+  sent: 'text-accent-700',
+  failed: 'text-red-600',
+  not_configured: 'text-amber-700',
+  no_contact: 'text-slate-500',
+};
+
+export default function BookingConfirmation({
+  result,
+  doctorName,
+  date,
+  time,
+  patientEmail,
+  patientPhone,
+  onDone,
+}: BookingConfirmationProps) {
+  const rows = [
+    { icon: Mail, label: `Patient email (${patientEmail})`, status: result.notifications.patientEmail },
+    { icon: MessageSquare, label: `Patient SMS (${patientPhone})`, status: result.notifications.patientSms },
+    { icon: Mail, label: `Doctor email (${doctorName})`, status: result.notifications.doctorEmail },
+    { icon: MessageSquare, label: `Doctor SMS (${doctorName})`, status: result.notifications.doctorSms },
+  ];
+
+  return (
+    <div className="text-center">
+      <span className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-accent-100 text-accent-600">
+        <CheckCircle2 className="h-9 w-9" />
+      </span>
+      <h3 className="mt-6 text-2xl font-bold text-primary-900">Your appointment is booked</h3>
+      <p className="mt-3 text-slate-600">
+        {doctorName} on {formatDisplayDate(date)} at {formatDisplayTime(time)}
+      </p>
+      <p className="mt-2 text-sm text-slate-500">
+        Reference: <span className="font-mono font-semibold text-slate-700">{result.appointmentId.slice(0, 8).toUpperCase()}</span>
+      </p>
+
+      <ul className="mx-auto mt-8 max-w-md divide-y divide-slate-100 rounded-2xl border border-slate-100 bg-slate-50 text-left">
+        {rows.map(({ icon: Icon, label, status }) => (
+          <li key={label} className="flex items-center justify-between gap-4 px-5 py-3.5">
+            <span className="flex items-center gap-3 text-sm text-slate-700">
+              <Icon className="h-4 w-4 text-primary-500" />
+              {label}
+            </span>
+            <span className={`text-sm font-semibold ${STATUS_CLASS[status]}`}>{STATUS_TEXT[status]}</span>
+          </li>
+        ))}
+      </ul>
+
+      <button
+        type="button"
+        onClick={onDone}
+        className="mt-8 rounded-full bg-primary-600 px-8 py-3 text-sm font-semibold text-white shadow-lg shadow-primary-600/25 transition-all hover:-translate-y-0.5 hover:bg-primary-700"
+      >
+        Book another appointment
+      </button>
+    </div>
+  );
+}
+
+
+-------------------------------------------------------------------
+FILE: supabase/functions/book-appointment/index.ts
+-------------------------------------------------------------------
+import { createClient } from "npm:@supabase/supabase-js@2";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
+};
+
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+
+type Booking = {
+  doctorId: string;
+  date: string;
+  time: string;
+  patientName: string;
+  patientEmail: string;
+  patientPhone: string;
+  reason: string;
+};
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_RE = /^\+?[0-9\s()-]{7,20}$/;
+
+function parseBooking(input: unknown): Booking | string {
+  if (!input || typeof input !== "object") return "Invalid request.";
+  const b = input as Record<string, unknown>;
+  const str = (v: unknown, max: number) =>
+    typeof v === "string" ? v.trim().slice(0, max) : "";
+
+  const booking: Booking = {
+    doctorId: str(b.doctorId, 36),
+    date: str(b.date, 10),
+    time: str(b.time, 5),
+    patientName: str(b.patientName, 100),
+    patientEmail: str(b.patientEmail, 200),
+    patientPhone: str(b.patientPhone, 20),
+    reason: str(b.reason, 500),
+  };
+
+  if (!UUID_RE.test(booking.doctorId)) return "Please choose a doctor.";
+  if (!DATE_RE.test(booking.date) || Number.isNaN(Date.parse(booking.date)))
+    return "Please choose a valid date.";
+  if (!TIME_RE.test(booking.time)) return "Please choose a valid time slot.";
+  if (booking.patientName.length < 2) return "Please enter the patient's name.";
+  if (!EMAIL_RE.test(booking.patientEmail)) return "Please enter a valid email address.";
+  if (!PHONE_RE.test(booking.patientPhone)) return "Please enter a valid phone number.";
+  return booking;
+}
+
+function isoWeekday(date: string): number {
+  const day = new Date(`${date}T00:00:00Z`).getUTCDay();
+  return day === 0 ? 7 : day;
+}
+
+async function sendEmail(to: string, subject: string, text: string): Promise<string> {
+  const apiKey = Deno.env.get("RESEND_API_KEY");
+  if (!apiKey) return "not_configured";
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: Deno.env.get("RESEND_FROM") ?? "MHS <onboarding@resend.dev>",
+      to: [to],
+      subject,
+      text,
+    }),
+  });
+  return res.ok ? "sent" : "failed";
+}
+
+async function sendSms(to: string, body: string): Promise<string> {
+  const sid = Deno.env.get("TWILIO_ACCOUNT_SID");
+  const token = Deno.env.get("TWILIO_AUTH_TOKEN");
+  const from = Deno.env.get("TWILIO_FROM_NUMBER");
+  if (!sid || !token || !from) return "not_configured";
+  const form = new URLSearchParams({ To: to, From: from, Body: body });
+  const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${btoa(`${sid}:${token}`)}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: form.toString(),
+  });
+  return res.ok ? "sent" : "failed";
+}
+
+Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 200, headers: corsHeaders });
+  }
+
+  try {
+    if (req.method !== "POST") return json({ error: "Method not allowed." }, 405);
+
+    const parsed = parseBooking(await req.json().catch(() => null));
+    if (typeof parsed === "string") return json({ error: parsed }, 400);
+    const booking = parsed;
+
+    const today = new Date().toISOString().slice(0, 10);
+    if (booking.date < today) return json({ error: "Appointments must be in the future." }, 400);
+
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    );
+
+    const { data: doctor, error: doctorError } = await supabase
+      .from("doctors")
+      .select("id, name, specialty, working_days, email, phone")
+      .eq("id", booking.doctorId)
+      .maybeSingle();
+    if (doctorError) throw doctorError;
+    if (!doctor) return json({ error: "That doctor could not be found." }, 404);
+
+    if (!doctor.working_days.includes(isoWeekday(booking.date))) {
+      return json({ error: `${doctor.name} is not available on that day.` }, 409);
+    }
+
+    const { data: appointment, error: insertError } = await supabase
+      .from("appointments")
+      .insert({
+        doctor_id: booking.doctorId,
+        appointment_date: booking.date,
+        slot_time: booking.time,
+        patient_name: booking.patientName,
+        patient_email: booking.patientEmail,
+        patient_phone: booking.patientPhone,
+        reason: booking.reason,
+      })
+      .select("id")
+      .single();
+
+    if (insertError) {
+      if (insertError.code === "23505") {
+        return json({ error: "That time slot was just booked. Please pick another." }, 409);
+      }
+      throw insertError;
+    }
+
+    const when = `${booking.date} at ${booking.time}`;
+    const patientText = `Hello ${booking.patientName},\n\nYour appointment with ${doctor.name} (${doctor.specialty}) at MHS is confirmed for ${when}.\n\nReference: ${appointment.id}\n\nThank you for choosing MHS.`;
+    const doctorText = `Hello ${doctor.name},\n\nA new appointment has been booked with you for ${when}.\n\nPatient: ${booking.patientName}\nPhone: ${booking.patientPhone}\nEmail: ${booking.patientEmail}\nReason: ${booking.reason || "Not provided"}\n\nReference: ${appointment.id}`;
+    const patientSms = `MHS: Your appointment with ${doctor.name} is confirmed for ${when}. Ref: ${appointment.id}`;
+    const doctorSms = `MHS: New appointment with patient ${booking.patientName} on ${when}. Ref: ${appointment.id}`;
+
+    const [patientEmailStatus, patientSmsStatus, doctorEmailStatus, doctorSmsStatus] =
+      await Promise.all([
+        sendEmail(booking.patientEmail, "Your MHS appointment is confirmed", patientText).catch(() => "failed"),
+        sendSms(booking.patientPhone, patientSms).catch(() => "failed"),
+        doctor.email
+          ? sendEmail(doctor.email, "New MHS appointment booked", doctorText).catch(() => "failed")
+          : Promise.resolve("no_contact"),
+        doctor.phone
+          ? sendSms(doctor.phone, doctorSms).catch(() => "failed")
+          : Promise.resolve("no_contact"),
+      ]);
+
+    return json({
+      appointmentId: appointment.id,
+      notifications: {
+        patientEmail: patientEmailStatus,
+        patientSms: patientSmsStatus,
+        doctorEmail: doctorEmailStatus,
+        doctorSms: doctorSmsStatus,
+      },
+    });
+  } catch (err) {
+    console.error("book-appointment failed", err);
+    return json({ error: "Something went wrong while booking. Please try again." }, 500);
+  }
+});
+
+
+-------------------------------------------------------------------
+FILE: supabase/config.toml
+-------------------------------------------------------------------
+[functions.book-appointment]
+verify_jwt = false
+
+
+-------------------------------------------------------------------
+FILE: supabase/migrations/20261030062112_create_mhs_doctors_and_appointments.sql
+-------------------------------------------------------------------
+/*
+# Create doctors and appointments for MHS medical booking
+
+1. New Tables
+- `doctors`: public directory of doctors (name, specialty, qualification, experience, bio, photo, weekly working days).
+- `appointments`: booked consultations (doctor, date, time slot, patient name, email, phone, reason, status).
+
+2. Security
+- Enable RLS on both tables.
+- `doctors`: readable by anon and authenticated (public directory). No writes from the browser.
+- `appointments`: no direct browser access at all. Patient details stay private; bookings are created by a server function using the service role.
+- Function `get_booked_slots`: returns only the booked time slots for a doctor on a date (no patient data), callable by the public booking page.
+
+3. Important Notes
+- A unique constraint on (doctor_id, appointment_date, slot_time) prevents two patients from booking the same slot.
+- Seed data inserts four sample doctors only if the table is empty.
+*/
+
+CREATE TABLE IF NOT EXISTS doctors (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  specialty text NOT NULL,
+  qualification text NOT NULL,
+  experience_years integer NOT NULL DEFAULT 0 CHECK (experience_years >= 0),
+  bio text NOT NULL DEFAULT '',
+  working_days integer[] NOT NULL DEFAULT '{1,2,3,4,5}',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS appointments (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  doctor_id uuid NOT NULL REFERENCES doctors(id) ON DELETE RESTRICT,
+  appointment_date date NOT NULL,
+  slot_time time NOT NULL,
+  patient_name text NOT NULL,
+  patient_email text NOT NULL,
+  patient_phone text NOT NULL,
+  reason text NOT NULL DEFAULT '',
+  status text NOT NULL DEFAULT 'confirmed' CHECK (status IN ('confirmed', 'cancelled')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT appointments_unique_slot UNIQUE (doctor_id, appointment_date, slot_time)
+);
+
+CREATE INDEX IF NOT EXISTS appointments_doctor_date_idx ON appointments (doctor_id, appointment_date);
+
+ALTER TABLE doctors ENABLE ROW LEVEL SECURITY;
+ALTER TABLE appointments ENABLE ROW LEVEL SECURITY;
+
+GRANT SELECT ON doctors TO anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON doctors TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON appointments TO service_role;
+
+DROP POLICY IF EXISTS "public_select_doctors" ON doctors;
+CREATE POLICY "public_select_doctors" ON doctors FOR SELECT
+  TO anon, authenticated USING (true);
+
+CREATE OR REPLACE FUNCTION get_booked_slots(p_doctor_id uuid, p_date date)
+RETURNS SETOF time
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT a.slot_time FROM appointments a
+  WHERE a.doctor_id = p_doctor_id
+    AND a.appointment_date = p_date
+    AND a.status = 'confirmed';
+$$;
+
+REVOKE EXECUTE ON FUNCTION get_booked_slots(uuid, date) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION get_booked_slots(uuid, date) TO anon, authenticated;
+
+INSERT INTO doctors (name, specialty, qualification, experience_years, bio, working_days)
+SELECT * FROM (VALUES
+  ('Dr. Ananya Sharma', 'Cardiologist', 'MD, DM Cardiology', 14, 'Specialises in preventive heart care, hypertension management and cardiac rehabilitation.', ARRAY[1,2,3,4,5,6]),
+  ('Dr. Rahul Mehta', 'Dermatologist', 'MBBS, MD Dermatology', 9, 'Treats acne, eczema and hair disorders with a focus on long-term skin health.', ARRAY[1,3,4,5,6]),
+  ('Dr. Priya Nair', 'Pediatrician', 'MBBS, DCH, MD Pediatrics', 11, 'Caring for newborns, children and adolescents, including vaccinations and growth checks.', ARRAY[1,2,3,4,5]),
+  ('Dr. Arjun Rao', 'Orthopedic Surgeon', 'MS Orthopedics', 17, 'Joint replacement, sports injuries and spine care with minimally invasive techniques.', ARRAY[2,3,4,5,6])
+) AS seed(name, specialty, qualification, experience_years, bio, working_days)
+WHERE NOT EXISTS (SELECT 1 FROM doctors);
+
+
+-------------------------------------------------------------------
+FILE: supabase/migrations/20261030062129_add_doctor_contact_details.sql
+-------------------------------------------------------------------
+/*
+# Add contact details to doctors
+
+1. Modified Tables
+- `doctors`: new optional columns `email` and `phone` used to send booking notifications to the doctor.
+
+2. Security
+- No change to access. (Note: this migration's original wording was inaccurate. The
+  access restriction that actually keeps these columns private is in the next migration.)
+
+3. Important Notes
+- Both columns are nullable so doctors without contact details can still be listed; the booking function skips notifications for them.
+*/
+
+ALTER TABLE doctors ADD COLUMN IF NOT EXISTS email text;
+ALTER TABLE doctors ADD COLUMN IF NOT EXISTS phone text;
+
+
+-------------------------------------------------------------------
+FILE: supabase/migrations/20261030062141_restrict_doctor_public_columns.sql
+-------------------------------------------------------------------
+/*
+# Restrict public doctor directory to display columns
+
+1. Modified Tables
+- `doctors`: public read access narrowed so that the private contact columns (`email`, `phone`) are NOT readable by the browser.
+
+2. Security
+- Revoke the table-wide SELECT from anon and authenticated.
+- Grant SELECT only on the public display columns: id, name, specialty, qualification, experience_years, bio, working_days, created_at.
+- Contact details remain readable by server functions (service role) only.
+
+3. Important Notes
+- No data is changed or removed.
+*/
+
+REVOKE SELECT ON doctors FROM anon, authenticated;
+GRANT SELECT (id, name, specialty, qualification, experience_years, bio, working_days, created_at) ON doctors TO anon, authenticated;
