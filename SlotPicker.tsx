@@ -1,5 +1,23 @@
 import { Clock } from 'lucide-react';
-import { SLOT_TIMES, formatDisplayTime, isSlotInPast } from '@/lib/booking';
+// We removed SLOT_TIMES from the import below since we are adding it directly to this file
+import { formatDisplayTime, isSlotInPast } from '@/lib/booking';
+
+// Added the 15-minute interval time slots (11am-2pm and 6pm-11pm)
+const SLOT_TIMES = [
+  // Morning / Afternoon Session
+  "11:00 AM", "11:15 AM", "11:30 AM", "11:45 AM",
+  "12:00 PM", "12:15 PM", "12:30 PM", "12:45 PM",
+  "01:00 PM", "01:15 PM", "01:30 PM", "01:45 PM",
+  "02:00 PM",
+  
+  // Evening Session
+  "06:00 PM", "06:15 PM", "06:30 PM", "06:45 PM",
+  "07:00 PM", "07:15 PM", "07:30 PM", "07:45 PM",
+  "08:00 PM", "08:15 PM", "08:30 PM", "08:45 PM",
+  "09:00 PM", "09:15 PM", "09:30 PM", "09:45 PM",
+  "10:00 PM", "10:15 PM", "10:30 PM", "10:45 PM",
+  "11:00 PM"
+];
 
 type SlotPickerProps = {
   date: string;
